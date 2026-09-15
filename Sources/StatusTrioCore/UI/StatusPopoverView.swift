@@ -271,6 +271,7 @@ struct StatusPopoverView: View {
             case .wifi(let showDetails):
                 WiFiNetworkListView(
                     controller: store.wifiNetworks,
+                    hotspots: store.wifiNetworks.hotspots,
                     wifi: store.popupSnapshot.wifi,
                     onBack: { panel = .summary },
                     onRequestNameAccess: requestWiFiNameAccess,
@@ -291,7 +292,7 @@ struct StatusPopoverView: View {
     }
 
     private var summary: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             ForEach(settings.popupSectionOrder) { section in
                 popupSection(section)
 
@@ -328,7 +329,7 @@ struct StatusPopoverView: View {
                 onOpenBatterySettings: openBatterySettings
             )
         case .network:
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 WiFiStatusView(
                     wifi: store.popupSnapshot.wifi,
                     onOpenDetails: { showDetails in

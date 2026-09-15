@@ -1,3 +1,4 @@
+import CoreWLAN
 import Foundation
 import Security
 
@@ -8,14 +9,19 @@ protocol WiFiCredentialStoring: AnyObject {
     /// Returns false on a Keychain write failure so the UI can report that the
     /// connection succeeded but the requested remembered-password save did not.
     func save(_ password: String, for identity: WiFiNetworkIdentity) -> Bool
+    func invalidate(for identity: WiFiNetworkIdentity)
+}
+
+extension WiFiCredentialStoring {
+    func invalidate(for identity: WiFiNetworkIdentity) {}
 }
 
 /// Reads two deliberately separate credential namespaces on demand:
 ///
 /// - the app-owned generic-password item for passwords the user chose to
 ///   remember in Status Trio; and
-/// - the user Keychain standard `AirPort network password` item for a
-///   personal SSID, when the user has authorized access to that system item.
+/// - CoreWLAN Wi-Fi password lookup in the user (including iCloud) and
+///   system keychain domains, subject to system authorization.
 ///
 /// CoreWLAN does not provide a public API to enumerate saved passwords, and
 /// `associate(password: nil)` is not treated as credential reuse. The system
@@ -23,7 +29,6 @@ protocol WiFiCredentialStoring: AnyObject {
 /// cancellation, denial, locked-keychain, and read errors remain distinct.
 final class KeychainWiFiPasswordStore: WiFiCredentialStoring, @unchecked Sendable {
     private let appService: String
-    private let systemAirPortService = "AirPort network password"
 
     init(appService: String = "io.github.404404.StatusTrio.wifi-password") {
         self.appService = appService
@@ -38,10 +43,7 @@ final class KeychainWiFiPasswordStore: WiFiCredentialStoring, @unchecked Sendabl
         case .credential, .issue:
             return appResult
         case .noCredential:
-            return read(
-                query: systemAirPortQuery(for: identity),
-                source: .systemKeychain
-            )
+            return Self.findSystemCredential(ssid: identity.ssid)
         }
     }
 
@@ -123,14 +125,31 @@ final class KeychainWiFiPasswordStore: WiFiCredentialStoring, @unchecked Sendabl
         return attributes
     }
 
-    private func systemAirPortQuery(for identity: WiFiNetworkIdentity) -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: systemAirPortService,
-            kSecAttrAccount as String: identity.ssid,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIAllow,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnData as String: true
-        ]
+    static func findSystemCredential(
+        ssid: String,
+        lookup: (CWKeychainDomain, Data) -> (OSStatus, String?) = { domain, data in
+            var password: NSString?
+            let status = CWKeychainFindWiFiPassword(domain, data, &password)
+            return (status, password as String?)
+        }
+    ) -> WiFiCredentialResult {
+        for domain in [CWKeychainDomain.user, .system] {
+            let (status, password) = lookup(domain, Data(ssid.utf8))
+            switch status {
+            case errSecSuccess:
+                guard let password, !password.isEmpty else { return .issue(.readFailed) }
+                return .credential(password, .systemKeychain)
+            case errSecItemNotFound: continue
+            // On current macOS the user-domain CoreWLAN service may return
+            // 4097 even for a nonexistent SSID. The system domain remains usable.
+            // Do not apply this fallback to authorization failures or cancellation.
+            case 4097 where domain == .user: continue
+            case errSecUserCanceled: return .issue(.cancelled)
+            case errSecAuthFailed: return .issue(.accessDenied)
+            case errSecInteractionNotAllowed, errSecNotAvailable: return .issue(.keychainLocked)
+            default: return .issue(.readFailed)
+            }
+        }
+        return .noCredential
     }
 }

@@ -259,8 +259,11 @@ final class SystemStatusStore: ObservableObject {
     }
 
     private func applyWiFi(_ value: WiFiStatus) {
+        let previous = snapshot.wifi
         publish(snapshot.replacingWiFi(value))
-        wifiNetworks.refresh(nameAccess: value.nameAccess)
+        if previous.nameAccess != value.nameAccess || previous.ssid != value.ssid || previous.state != value.state {
+            wifiNetworks.refresh(nameAccess: value.nameAccess)
+        }
     }
 
     private func applyConnection(_ value: NetworkConnection) {

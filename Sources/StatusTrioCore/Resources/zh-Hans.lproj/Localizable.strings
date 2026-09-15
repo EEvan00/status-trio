@@ -190,3 +190,5 @@
 "bluetooth.authorizationNotDetermined" = "Bluetooth permission has not been decided yet.";
 "bluetooth.authorizationDenied" = "Bluetooth permission is denied. Open Bluetooth Settings.";
 "bluetooth.authorizationRestricted" = "Bluetooth permission is restricted.";
+
+"wifi.personalHotspot" = "个人热点";

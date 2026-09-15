@@ -3,6 +3,7 @@ import SwiftUI
 
 struct WiFiNetworkListView: View {
     @ObservedObject var controller: WiFiNetworkController
+    @ObservedObject var hotspots: PersonalHotspotController
     @EnvironmentObject private var localization: Localization
     let wifi: WiFiStatus
     let onBack: () -> Void
@@ -23,10 +24,11 @@ struct WiFiNetworkListView: View {
                     set: { controller.setPower($0) }
                 )
             )
-            .disabled(controller.state == .noInterface)
+            .disabled(controller.state == .noInterface || hotspots.connectingID != nil || controller.state.isConnectionFlow)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
+                    PersonalHotspotSection(controller: hotspots, currentSSID: controller.details.ssid ?? wifi.ssid, disabled: controller.state.isConnectionFlow || wifi.state == .off)
                     currentNetworkSection
                     otherNetworksSection
                     stateMessage
@@ -237,7 +239,7 @@ struct WiFiNetworkListView: View {
     }
 
     private var isConnectingAnotherNetwork: Bool {
-        controller.state.isConnectionFlow
+        controller.state.isConnectionFlow || hotspots.connectingID != nil
     }
 
     private func displaySSID(_ ssid: String) -> String {

@@ -12,7 +12,7 @@ private struct StatusBarAccessibilityKey: Equatable {
 }
 
 @MainActor
-final class StatusBarController: NSObject, NSPopoverDelegate {
+final class StatusBarController: NSObject {
     static let iconSnapshotDebounceInterval: TimeInterval = 0.5
 
     enum ClickKind: Equatable {
@@ -21,7 +21,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     }
 
     private let statusItem: NSStatusItem
-    private let popover = NSPopover()
+    private let popover = StatusPopupPanel()
     private let store: SystemStatusStore
     private let settings: SettingsStore
     private let localization: Localization
@@ -216,8 +216,12 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     }
 
     private func configurePopover() {
-        popover.behavior = .transient
-        popover.delegate = self
+        popover.preventsAutomaticDismissal = { [weak self] in
+            self?.store.wifiNetworks.state.isConnectionFlow == true || self?.store.wifiNetworks.hotspots.connectingID != nil
+        }
+        popover.onClose = { [weak self] in
+            self?.popoverDidClose()
+        }
     }
 
     private func installPopoverContentIfNeeded() {
@@ -236,7 +240,16 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
                 quit: quitAction
             )
         }
-        let hostingController = NSHostingController(rootView: rootView)
+        let hostingController = NSHostingController(
+            rootView: rootView
+                .background(.regularMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: StatusPopupPanel.cornerRadius)
+                        .strokeBorder(.primary.opacity(0.25), lineWidth: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+        )
         hostingController.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hostingController
     }
@@ -256,7 +269,8 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
             // Status-item clicks come from the system menu bar process, so the
             // modern activate() can be ignored by the user-activation policy.
             NSApp.activate(ignoringOtherApps: true)
-            popover.contentViewController?.view.window?.makeKey()
+            popover.makeKey()
+            popover.makeFirstResponder(nil)
             installPopoverDismissMonitor()
             installVolumeScrollMonitor()
         }
@@ -268,7 +282,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.popover.performClose(nil)
+                self?.popover.dismissAutomatically()
             }
         }
     }
@@ -350,7 +364,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         volumeScrollSession.reset()
     }
 
-    func popoverDidClose(_ notification: Notification) {
+    func popoverDidClose() {
         removePopoverDismissMonitor()
         removeVolumeScrollMonitor()
         store.setPopoverVisible(false)

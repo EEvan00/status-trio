@@ -233,6 +233,7 @@ final class WirelessListModelsTests: XCTestCase {
 
         controller.deactivate()
         XCTAssertEqual(monitor.stopCount, 1)
+        XCTAssertEqual(controller.availability, .available)
         notifications.post(name: NSWorkspace.didWakeNotification, object: nil)
         await Task.yield()
         XCTAssertEqual(monitor.startCount, 2)

@@ -38,11 +38,14 @@ struct BluetoothStatusView: View {
                 .help(localization.string(.bluetoothActionOpenSettings))
                 .frame(width: 24, height: 24)
         }
+        .task { controller.activateIfAuthorized() }
     }
 
     private var summary: String {
         switch controller.availability {
-        case .idle, .initializing:
+        case .idle:
+            return localization.string(.bluetoothAuthorizationNotDetermined)
+        case .initializing:
             return localization.string(.bluetoothInitializing)
         case .authorizationNotDetermined:
             return localization.string(.bluetoothAuthorizationNotDetermined)

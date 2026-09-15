@@ -170,6 +170,12 @@ final class BluetoothDeviceController: ObservableObject {
         BluetoothDevicePresentation.grouped(devices).connected
     }
 
+    /// Summary reads must not trigger the first Bluetooth permission prompt.
+    func activateIfAuthorized() {
+        guard CBManager.authorization == .allowedAlways else { return }
+        activate()
+    }
+
     func activate() {
         guard !isActive else { return }
         isActive = true
@@ -185,7 +191,7 @@ final class BluetoothDeviceController: ObservableObject {
         periodicRefreshTask = nil
         removeSystemObservers()
         stateMonitor.stop()
-        availability = .idle
+        // Closing the detail view does not invalidate the last known state.
     }
 
     func refresh() {

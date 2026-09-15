@@ -338,6 +338,10 @@ private final class WiFiCredentialWorker: @unchecked Sendable {
         }
     }
 
+    func invalidate(_ identity: WiFiNetworkIdentity) {
+        queue.async { [self] in store.invalidate(for: identity) }
+    }
+
     func save(
         _ password: String,
         for identity: WiFiNetworkIdentity,
@@ -358,6 +362,7 @@ final class WiFiNetworkController: ObservableObject {
     @Published private(set) var passwordPromptNetwork: WiFiNetwork?
     @Published private(set) var credentialIssue: WiFiCredentialIssue?
 
+    let hotspots = PersonalHotspotController()
     private let worker = CoreWLANNetworkWorker()
     private let credentialWorker: WiFiCredentialWorker
     private var scanGate = AsyncRequestGate()
@@ -367,8 +372,9 @@ final class WiFiNetworkController: ObservableObject {
     private var periodicRefreshTask: Task<Void, Never>?
     private var lastNameAccess: WiFiNameAccess = .notDetermined
 
-    init(credentialStore: any WiFiCredentialStoring = KeychainWiFiPasswordStore()) {
+    init(credentialStore: any WiFiCredentialStoring = SessionWiFiCredentialStore()) {
         credentialWorker = WiFiCredentialWorker(store: credentialStore)
+        hotspots.didConnect = { [weak self] in self?.refresh() }
     }
     deinit {
         periodicRefreshTask?.cancel()
@@ -384,6 +390,7 @@ final class WiFiNetworkController: ObservableObject {
     func deactivate() {
         guard isActive else { return }
         isActive = false
+        hotspots.stop()
         _ = scanGate.advance()
         _ = connectionGate.advance()
         periodicRefreshTask?.cancel()
@@ -398,16 +405,18 @@ final class WiFiNetworkController: ObservableObject {
 
     func refresh(nameAccess: WiFiNameAccess? = nil) {
         if let nameAccess { lastNameAccess = nameAccess }
-        guard isActive, !state.isConnectionFlow else { return }
+        guard isActive, !state.isConnectionFlow, hotspots.connectingID == nil else { return }
         // CoreWLAN may return empty or redacted results before authorization.
         // Keep that distinct from a successful scan with no nearby networks.
         guard lastNameAccess == .authorized else {
+            hotspots.stop()
             _ = scanGate.advance()
             networks = []
             details = .unavailable
             state = lastNameAccess == .notDetermined ? .idle : .permissionDenied
             return
         }
+        hotspots.start()
         guard !state.isScanning else { return }
 
         let request = scanGate.advance()
@@ -441,7 +450,7 @@ final class WiFiNetworkController: ObservableObject {
     }
 
     func beginConnection(to network: WiFiNetwork) {
-        guard isActive, !state.isConnectionFlow else { return }
+        guard isActive, !state.isConnectionFlow, hotspots.connectingID == nil else { return }
 
         pendingNetwork = network
         passwordPromptNetwork = nil
@@ -559,6 +568,8 @@ final class WiFiNetworkController: ObservableObject {
         rememberPassword: Bool,
         request: UInt64
     ) {
+        if case .failed = result { credentialWorker.invalidate(network.identity) }
+        if case .timedOut = result { credentialWorker.invalidate(network.identity) }
         switch result {
         case let .success(connectionDetails):
             self.details = connectionDetails

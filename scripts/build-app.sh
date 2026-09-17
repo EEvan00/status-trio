@@ -109,7 +109,11 @@ done <<'SIZES'
 SIZES
 
 rm -rf "$APP_DIR"
-mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources" "$CONTENTS/Frameworks"
+mkdir -p \
+    "$CONTENTS/MacOS" \
+    "$CONTENTS/Resources" \
+    "$CONTENTS/Frameworks" \
+    "$CONTENTS/Library/LaunchDaemons"
 
 CORE_RESOURCE_BUNDLE="$BIN_PATH/StatusTrio_StatusTrioCore.bundle"
 if [[ ! -d "$CORE_RESOURCE_BUNDLE" ]]; then
@@ -119,6 +123,8 @@ fi
 
 cp "$BIN_PATH/StatusTrio" "$CONTENTS/MacOS/StatusTrio"
 cp -R "$CORE_RESOURCE_BUNDLE" "$CONTENTS/Resources/"
+cp "$BIN_PATH/StatusTrioMagSafeHelper" "$CONTENTS/Resources/StatusTrioMagSafeHelper"
+cp "$ROOT/Support/com.status-trio.magsafe-helper.plist" "$CONTENTS/Library/LaunchDaemons/com.status-trio.magsafe-helper.plist"
 
 SPARKLE_FRAMEWORK_SOURCE="$(find "$ROOT/.build/artifacts" -path '*/Sparkle.xcframework/macos-*/Sparkle.framework' -type d -print -quit)"
 if [[ -z "$SPARKLE_FRAMEWORK_SOURCE" ]]; then
@@ -171,7 +177,9 @@ done < <(find "$ROOT/Sources/StatusTrioCore/Resources" -name 'InfoPlist.strings'
 
 iconutil --convert icns --output "$CONTENTS/Resources/AppIcon.icns" "$ICONSET_DIR"
 
-chmod +x "$CONTENTS/MacOS/StatusTrio"
+chmod +x \
+    "$CONTENTS/MacOS/StatusTrio" \
+    "$CONTENTS/Resources/StatusTrioMagSafeHelper"
 
 # SwiftPM can record the deployment target as the SDK version in LC_BUILD_VERSION.
 # macOS uses that field to decide whether an app adopts the current design system,
@@ -179,10 +187,21 @@ chmod +x "$CONTENTS/MacOS/StatusTrio"
 SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
 if [[ "${SDK_VERSION%%.*}" -ge 26 ]]; then
     TOOLCHAIN_PLATFORM_VERSION="26.0"
-    VTMP_BINARY="$(mktemp "${TMPDIR:-/tmp}/StatusTrio.vtool.XXXXXX")"
-    xcrun vtool         -set-build-version macos 15.0 "$TOOLCHAIN_PLATFORM_VERSION"         -replace         -output "$VTMP_BINARY"         "$CONTENTS/MacOS/StatusTrio"
-    mv "$VTMP_BINARY" "$CONTENTS/MacOS/StatusTrio"
-    chmod +x "$CONTENTS/MacOS/StatusTrio"
+    restore_deployment_target() {
+        local binary="$1"
+        local temporary_binary
+        temporary_binary="$(mktemp "${TMPDIR:-/tmp}/StatusTrio.vtool.XXXXXX")"
+        xcrun vtool \
+            -set-build-version macos 15.0 "$TOOLCHAIN_PLATFORM_VERSION" \
+            -replace \
+            -output "$temporary_binary" \
+            "$binary"
+        mv "$temporary_binary" "$binary"
+        chmod +x "$binary"
+    }
+
+    restore_deployment_target "$CONTENTS/MacOS/StatusTrio"
+    restore_deployment_target "$CONTENTS/Resources/StatusTrioMagSafeHelper"
 fi
 
 SIGNING_IDENTITY="${CODE_SIGN_IDENTITY:--}"
@@ -195,6 +214,7 @@ if [[ "$SIGNING_IDENTITY" != "-" ]]; then
 fi
 
 codesign "${SIGNING_ARGS[@]}" "$CONTENTS/Frameworks/Sparkle.framework"
+codesign "${SIGNING_ARGS[@]}" "$CONTENTS/Resources/StatusTrioMagSafeHelper"
 codesign "${SIGNING_ARGS[@]}" "$APP_DIR"
 codesign --verify --deep --strict --verbose=2 "$APP_DIR"
 
@@ -205,6 +225,10 @@ plutil -lint "$CONTENTS/Info.plist"
 }
 [[ -f "$CONTENTS/Resources/AppIcon.icns" ]] || { echo "Error: packaged app icon is missing." >&2; exit 1; }
 [[ -d "$CONTENTS/Resources/StatusTrio_StatusTrioCore.bundle" ]] || { echo "Error: packaged resource bundle is missing." >&2; exit 1; }
+[[ -x "$CONTENTS/Resources/StatusTrioMagSafeHelper" ]] || { echo "Error: packaged MagSafe helper is missing." >&2; exit 1; }
+[[ -f "$CONTENTS/Library/LaunchDaemons/com.status-trio.magsafe-helper.plist" ]] || { echo "Error: packaged MagSafe launch daemon plist is missing." >&2; exit 1; }
+plutil -lint "$CONTENTS/Library/LaunchDaemons/com.status-trio.magsafe-helper.plist"
+codesign --verify --strict --verbose=2 "$CONTENTS/Resources/StatusTrioMagSafeHelper"
 
 if [[ "$UNIVERSAL_BUILD" == "1" ]]; then
     verify_universal_binary() {
@@ -218,6 +242,7 @@ if [[ "$UNIVERSAL_BUILD" == "1" ]]; then
     }
 
     verify_universal_binary "$CONTENTS/MacOS/StatusTrio"
+    verify_universal_binary "$CONTENTS/Resources/StatusTrioMagSafeHelper"
     while IFS= read -r binary; do
         if file "$binary" | grep -q 'Mach-O'; then
             verify_universal_binary "$binary"

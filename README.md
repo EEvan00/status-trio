@@ -32,6 +32,7 @@ Status Trio is a native macOS menubar app that combines Wi-Fi, battery, and volu
 - **Configurable rendering** — choose an icon size from 16–36 pt, with 28 pt as the default.
 - **Connection icon choices** — optionally use the standard Wi-Fi signal icon for Ethernet, Personal Hotspot, temporary connections, or Internet Sharing.
 - **Detailed battery status** — percentage, charging bolt, estimated time to full, Low Power Mode, and a Battery Settings shortcut.
+- **Optional MagSafe LED control** — open Battery details to leave the connector light under system control or keep it off. The privileged helper runs only when the setting changes or must be reapplied after a wake or power-source transition.
 - **Wi-Fi awareness** — signal strength, current network name, and common connection states.
 - **Volume at a glance** — output level and mute state, with controls available from the popover.
 - **macOS-native controls** — left-click for a status popover and right-click for the standard menu.
@@ -104,7 +105,9 @@ Status Trio follows the macOS preferred language by default and includes English
 
 ## Privacy
 
-Status Trio reads status through public macOS frameworks. It does not use App Sandbox or require a network entitlement, and it does not include telemetry or analytics. Location access is optional and requested only when you choose to display the current Wi-Fi network name.
+Status Trio reads its regular status data through public macOS frameworks. It does not use App Sandbox or require a network entitlement, and it does not include telemetry or analytics. Location access is optional and requested only when you choose to display the current Wi-Fi network name.
+
+MagSafe LED control is an optional exception: Apple does not provide a public API for it, so this feature uses the private AppleSMC `ACLC` key on supported hardware. Enabling the feature registers a narrowly scoped launch daemon through macOS Service Management and requires user approval. The helper accepts only `system` or `off`, reports whether the verified SMC write succeeded, exits after each event, and can be unregistered only after it returns the LED to system control.
 
 ## Development
 

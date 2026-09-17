@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.github.404404.StatusTrio.MagSafeHelper</string>
+	<key>BundleProgram</key>
+	<string>Contents/Resources/StatusTrioMagSafeHelper</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>WatchPaths</key>
+    <array>
+		<string>/Users/Shared/Status Trio/magsafe-led-request</string>
+    </array>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>Nice</key>
+    <integer>10</integer>
+    <key>ThrottleInterval</key>
+    <integer>1</integer>
+</dict>
+</plist>

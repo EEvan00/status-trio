@@ -245,6 +245,7 @@ enum StatusPresentation {
 
 private enum PopoverPanel {
     case summary
+    case battery
     case wifi(showDetails: Bool)
     case bluetooth
 }
@@ -252,6 +253,7 @@ private enum PopoverPanel {
 struct StatusPopoverView: View {
     @ObservedObject var store: SystemStatusStore
     @ObservedObject var settings: SettingsStore
+    @ObservedObject var magSafeLED: MagSafeLEDController
     @EnvironmentObject private var localization: Localization
     let requestWiFiNameAccess: () -> Void
     let openBatterySettings: () -> Void
@@ -268,6 +270,11 @@ struct StatusPopoverView: View {
             switch panel {
             case .summary:
                 summary
+            case .battery:
+                MagSafeLEDView(
+                    controller: magSafeLED,
+                    onBack: { panel = .summary }
+                )
             case .wifi(let showDetails):
                 WiFiNetworkListView(
                     controller: store.wifiNetworks,
@@ -326,6 +333,10 @@ struct StatusPopoverView: View {
         case .battery:
             BatteryStatusView(
                 battery: store.popupSnapshot.battery,
+                onOpenDetails: {
+                    magSafeLED.refreshAvailability()
+                    panel = .battery
+                },
                 onOpenBatterySettings: openBatterySettings
             )
         case .network:

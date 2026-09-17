@@ -24,6 +24,7 @@ final class StatusBarController: NSObject {
     private let popover = StatusPopupPanel()
     private let store: SystemStatusStore
     private let settings: SettingsStore
+    private let magSafeLED: MagSafeLEDController
     private let localization: Localization
     private var cancellable: AnyCancellable?
     private var localizationCancellable: AnyCancellable?
@@ -45,12 +46,14 @@ final class StatusBarController: NSObject {
     init(
         store: SystemStatusStore,
         settings: SettingsStore,
+        magSafeLED: MagSafeLEDController,
         localization: Localization,
         openSettings: @escaping () -> Void,
         quitAction: @escaping () -> Void
     ) {
         self.store = store
         self.settings = settings
+        self.magSafeLED = magSafeLED
         self.localization = localization
         self.openSettings = openSettings
         self.quitAction = quitAction
@@ -217,7 +220,9 @@ final class StatusBarController: NSObject {
 
     private func configurePopover() {
         popover.preventsAutomaticDismissal = { [weak self] in
-            self?.store.wifiNetworks.state.isConnectionFlow == true || self?.store.wifiNetworks.hotspots.connectingID != nil
+            self?.store.wifiNetworks.state.isConnectionFlow == true
+                || self?.store.wifiNetworks.hotspots.connectingID != nil
+                || self?.magSafeLED.isBusy == true
         }
         popover.onClose = { [weak self] in
             self?.popoverDidClose()
@@ -230,6 +235,7 @@ final class StatusBarController: NSObject {
             StatusPopoverView(
                 store: store,
                 settings: settings,
+                magSafeLED: magSafeLED,
                 requestWiFiNameAccess: handleRequestWiFiNameAccess,
                 openBatterySettings: handleOpenBatterySettings,
                 openWiFiSettings: handleOpenWiFiSettings,

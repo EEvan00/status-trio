@@ -192,3 +192,16 @@
 "bluetooth.authorizationRestricted" = "Bluetooth permission is restricted.";
 
 "wifi.personalHotspot" = "个人热点";
+"battery.action.openDetails" = "打开电池控制";
+"magsafe.title" = "MagSafe";
+"magsafe.light" = "指示灯";
+"magsafe.followsSystem" = "跟随 macOS";
+"magsafe.off" = "熄灭";
+"magsafe.unsupported" = "这台 Mac 不支持控制 MagSafe 指示灯。";
+"magsafe.installHelper" = "启用 MagSafe 控制…";
+"magsafe.installExplanation" = "更改指示灯需要注册一个权限受限的系统辅助程序，macOS 会要求你批准。";
+"magsafe.uninstallHelper" = "移除 MagSafe 辅助程序…";
+"magsafe.error.install" = "无法安装 MagSafe 辅助程序。";
+"magsafe.error.uninstall" = "无法移除 MagSafe 辅助程序。";
+"magsafe.error.write" = "无法应用 MagSafe 指示灯设置。";
+"magsafe.privateAPIWarning" = "此功能使用取决于固件的私有 SMC 控制；它只改变灯光，不影响充电。";

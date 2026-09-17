@@ -5,6 +5,26 @@ import XCTest
 
 @MainActor
 final class SettingsRowHitAreaTests: XCTestCase {
+    func testBatterySummaryExposesAFullWidthDetailsAction() {
+        let localization = makeLocalization()
+        let view = BatteryStatusView(
+            battery: .placeholder,
+            onOpenDetails: {},
+            onOpenBatterySettings: {}
+        )
+        .environmentObject(localization)
+
+        let hitAreaWidths = interactiveSubViewWidths(
+            for: view,
+            size: NSSize(width: 300, height: 48)
+        )
+
+        XCTAssertTrue(
+            hitAreaWidths.contains { $0 >= 250 },
+            "Expected a wide Battery details action, got \(hitAreaWidths)"
+        )
+    }
+
     func testPopupSettingsButtonUsesFullRowHitArea() {
         let localization = makeLocalization()
         let settings = makeSettings()
@@ -16,6 +36,7 @@ final class SettingsRowHitAreaTests: XCTestCase {
         let view = StatusPopoverView(
             store: store,
             settings: settings,
+            magSafeLED: .unavailable(),
             requestWiFiNameAccess: {},
             openBatterySettings: {},
             openWiFiSettings: {},

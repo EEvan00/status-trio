@@ -540,6 +540,82 @@ final class SystemStatusStoreTests: XCTestCase {
         store.stop()
     }
 
+    func testWakeNotificationReappliesOffMagSafeModeOnce() async {
+        let wakeCenter = NotificationCenter()
+        let writer = StoreRecordingMagSafeCommandWriter()
+        let controller = makeReadyMagSafeController(writer: writer)
+        let reapplied = expectation(description: "MagSafe off mode reapplied after wake")
+        let store = SystemStatusStore(
+            batteryMonitor: FakeBatteryMonitor(),
+            wifiMonitor: FakeWiFiMonitor(),
+            volumeMonitor: FakeVolumeMonitor(),
+            magSafeLED: controller,
+            refreshInterval: .seconds(60),
+            wakeNotificationCenter: wakeCenter
+        )
+
+        store.start()
+        controller.setLightEnabled(false)
+        await waitUntilIdle(controller)
+        writer.modes.removeAll()
+        writer.onWrite = { reapplied.fulfill() }
+        wakeCenter.post(name: NSWorkspace.didWakeNotification, object: nil)
+        await fulfillment(of: [reapplied], timeout: 1)
+
+        XCTAssertEqual(writer.modes, [.off])
+        store.stop()
+    }
+
+    func testStartReappliesPersistedOffMagSafeModeOnce() async {
+        let writer = StoreRecordingMagSafeCommandWriter()
+        let controller = makeReadyMagSafeController(writer: writer)
+        controller.setLightEnabled(false)
+        await waitUntilIdle(controller)
+        writer.modes.removeAll()
+        let reapplied = expectation(description: "MagSafe off mode reapplied at launch")
+        writer.onWrite = { reapplied.fulfill() }
+        let store = SystemStatusStore(
+            batteryMonitor: FakeBatteryMonitor(),
+            wifiMonitor: FakeWiFiMonitor(),
+            volumeMonitor: FakeVolumeMonitor(),
+            magSafeLED: controller,
+            refreshInterval: .seconds(60)
+        )
+
+        store.start()
+        await fulfillment(of: [reapplied], timeout: 1)
+
+        XCTAssertEqual(writer.modes, [.off])
+        store.stop()
+    }
+
+    func testPowerSourceTransitionReappliesOffMagSafeModeWithoutPolling() async {
+        let battery = FakeBatteryMonitor()
+        let writer = StoreRecordingMagSafeCommandWriter()
+        let controller = makeReadyMagSafeController(writer: writer)
+        let reapplied = expectation(description: "MagSafe off mode reapplied after power transition")
+        let store = SystemStatusStore(
+            batteryMonitor: battery,
+            wifiMonitor: FakeWiFiMonitor(),
+            volumeMonitor: FakeVolumeMonitor(),
+            magSafeLED: controller,
+            refreshInterval: .seconds(60)
+        )
+
+        store.start()
+        controller.setLightEnabled(false)
+        await waitUntilIdle(controller)
+        writer.modes.removeAll()
+        writer.onWrite = { reapplied.fulfill() }
+        battery.send(makeBattery(percentage: 80, connectedToPower: true))
+        await fulfillment(of: [reapplied], timeout: 1)
+        battery.send(makeBattery(percentage: 79, connectedToPower: true))
+        await drainMainActorTasks()
+
+        XCTAssertEqual(writer.modes, [.off])
+        store.stop()
+    }
+
     func testWakeNotificationAfterStopDoesNotRefresh() async {
         let battery = FakeBatteryMonitor()
         let wifi = FakeWiFiMonitor()
@@ -713,18 +789,60 @@ final class SystemStatusStoreTests: XCTestCase {
         )
     }
 
-    private func makeBattery(percentage: Int) -> BatteryStatus {
+    private func makeBattery(
+        percentage: Int,
+        connectedToPower: Bool = false
+    ) -> BatteryStatus {
         BatteryStatus(
             rawPercentage: percentage,
             isPresent: true,
             isCharging: false,
             isLowPowerMode: false,
-            isConnectedToPower: false
+            isConnectedToPower: connectedToPower
         )
+    }
+
+    private func makeReadyMagSafeController(
+        writer: StoreRecordingMagSafeCommandWriter
+    ) -> MagSafeLEDController {
+        let defaults = UserDefaults(
+            suiteName: "SystemStatusStoreTests.MagSafeLED.\(UUID().uuidString)"
+        )!
+        return MagSafeLEDController(
+            defaults: defaults,
+            hardwareProbe: StoreSupportedMagSafeProbe(),
+            helperManager: StoreInstalledMagSafeHelperManager(),
+            commandWriter: writer
+        )
+    }
+
+    private func waitUntilIdle(_ controller: MagSafeLEDController) async {
+        while controller.isBusy { await Task.yield() }
     }
 
     private func drainMainActorTasks() async {
         await Task { @MainActor in }.value
+    }
+}
+
+private struct StoreSupportedMagSafeProbe: MagSafeLEDHardwareProbing {
+    func supportsLEDControl() -> Bool { true }
+}
+
+private struct StoreInstalledMagSafeHelperManager: MagSafeLEDHelperManaging {
+    var status: MagSafeLEDHelperStatus { .enabled }
+    func install() async throws {}
+    func uninstall() async throws {}
+    func openSystemSettings() {}
+}
+
+private final class StoreRecordingMagSafeCommandWriter: MagSafeLEDCommandWriting, @unchecked Sendable {
+    var modes: [MagSafeLEDMode] = []
+    var onWrite: (() -> Void)?
+
+    func write(_ mode: MagSafeLEDMode) async throws {
+        modes.append(mode)
+        onWrite?()
     }
 }
 

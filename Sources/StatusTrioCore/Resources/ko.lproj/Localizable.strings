@@ -192,3 +192,16 @@
 "bluetooth.authorizationRestricted" = "Bluetooth permission is restricted.";
 
 "wifi.personalHotspot" = "Personal Hotspot";
+"battery.action.openDetails" = "Open battery controls";
+"magsafe.title" = "MagSafe";
+"magsafe.light" = "Indicator light";
+"magsafe.followsSystem" = "Follows macOS";
+"magsafe.off" = "Off";
+"magsafe.unsupported" = "This Mac does not expose MagSafe indicator control.";
+"magsafe.installHelper" = "Enable MagSafe Control…";
+"magsafe.installExplanation" = "A narrowly scoped system helper is required to change the indicator. macOS will ask you to approve it.";
+"magsafe.uninstallHelper" = "Remove MagSafe Helper…";
+"magsafe.error.install" = "The MagSafe helper could not be installed.";
+"magsafe.error.uninstall" = "The MagSafe helper could not be removed.";
+"magsafe.error.write" = "The MagSafe indicator setting could not be applied.";
+"magsafe.privateAPIWarning" = "Uses a private, firmware-dependent SMC control. It changes the light only, not charging.";

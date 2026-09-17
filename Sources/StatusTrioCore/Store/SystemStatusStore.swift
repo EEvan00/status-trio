@@ -17,6 +17,7 @@ final class SystemStatusStore: ObservableObject {
     private let connectionMonitor: (any NetworkConnectionMonitoring)?
     private let volumeMonitor: any VolumeMonitoring
     private let volumeController: (any VolumeControlling)?
+    private let magSafeLED: MagSafeLEDController?
     private var refreshInterval: Duration
     private let sleep: @Sendable (Duration) async throws -> Void
     private let popupDebounceSleep: @Sendable (Duration) async throws -> Void
@@ -35,6 +36,7 @@ final class SystemStatusStore: ObservableObject {
         wifiMonitor: any WiFiMonitoring,
         connectionMonitor: (any NetworkConnectionMonitoring)? = nil,
         volumeMonitor: any VolumeMonitoring,
+        magSafeLED: MagSafeLEDController? = nil,
         refreshInterval: Duration = .seconds(5),
         sleep: @escaping @Sendable (Duration) async throws -> Void = {
             try await Task.sleep(for: $0)
@@ -52,6 +54,7 @@ final class SystemStatusStore: ObservableObject {
         self.connectionMonitor = connectionMonitor
         self.volumeMonitor = volumeMonitor
         self.volumeController = volumeMonitor as? any VolumeControlling
+        self.magSafeLED = magSafeLED
         self.refreshInterval = refreshInterval
         self.sleep = sleep
         self.popupDebounceSleep = popupDebounceSleep
@@ -77,6 +80,7 @@ final class SystemStatusStore: ObservableObject {
         hasStarted = true
         wifiMonitor.setDetailsVisible(false)
         volumeMonitor.setDetailsVisible(false)
+        magSafeLED?.reapplyIfNeeded()
 
         wakeObserver = wakeNotificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
@@ -87,6 +91,7 @@ final class SystemStatusStore: ObservableObject {
                 guard let self else { return }
                 self.recoverAll()
                 self.refreshAll()
+                self.magSafeLED?.reapplyIfNeeded()
             }
         }
 
@@ -255,7 +260,11 @@ final class SystemStatusStore: ObservableObject {
     }
 
     private func applyBattery(_ value: BatteryStatus) {
+        let powerSourceChanged = snapshot.battery.isConnectedToPower != value.isConnectedToPower
         publish(snapshot.replacingBattery(value))
+        if powerSourceChanged {
+            magSafeLED?.reapplyIfNeeded()
+        }
     }
 
     private func applyWiFi(_ value: WiFiStatus) {

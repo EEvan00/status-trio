@@ -1,41 +1,78 @@
 import XCTest
-import MagSafeSMC
+@testable import MagSafeSMC
 @testable import StatusTrioCore
 
 @MainActor
 final class MagSafeLEDControllerTests: XCTestCase {
-    func testFileWriterReturnsOnlyAfterMatchingVerifiedAcknowledgement() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("StatusTrioMagSafeTests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let requestURL = directory.appendingPathComponent("request")
-        let resultURL = directory.appendingPathComponent("result")
-        let writer = FileMagSafeLEDCommandWriter(
-            requestURL: requestURL,
-            resultURL: resultURL,
-            timeout: .seconds(1),
-            retryInterval: .milliseconds(5)
-        )
-        let responder = Task.detached {
-            while !Task.isCancelled {
-                if let data = try? Data(contentsOf: requestURL),
-                   let text = String(data: data, encoding: .utf8),
-                   let request = MagSafeLEDRequest(configuration: text) {
-                    let result = MagSafeLEDResult(id: request.id, succeeded: true)
-                    try Data(result.configuration.utf8).write(to: resultURL, options: .atomic)
-                    return
-                }
-                try await Task.sleep(for: .milliseconds(5))
-            }
-        }
+    func testXPCWriterReturnsAfterDirectSuccessfulReply() async throws {
+        let transport = RecordingMagSafeXPCTransport(result: true)
+        let writer = XPCMagSafeLEDCommandWriter(transport: transport)
 
         try await writer.write(.off)
-        responder.cancel()
 
-        let requestData = try Data(contentsOf: requestURL)
-        let requestText = String(decoding: requestData, as: UTF8.self)
-        XCTAssertEqual(MagSafeLEDRequest(configuration: requestText)?.command, .off)
+        let values = await transport.values
+        XCTAssertEqual(values, [MagSafeLEDCommand.off.rawValue])
+    }
+
+    func testSingleOffClickPublishesAndPersistsAfterDelayedSMCConfirmation() async {
+        let suite = makeSuite()
+        defer { clear(suite) }
+        let transport = DelayedReadbackMagSafeXPCTransport()
+        let controller = MagSafeLEDController(
+            defaults: suite.defaults,
+            hardwareProbe: SupportedMagSafeProbe(),
+            helperManager: InstalledMagSafeHelperManager(),
+            commandWriter: XPCMagSafeLEDCommandWriter(transport: transport)
+        )
+
+        controller.setLightEnabled(false)
+        await waitUntilIdle(controller)
+
+        XCTAssertFalse(controller.isLightEnabled)
+        XCTAssertNil(controller.error)
+        XCTAssertEqual(suite.defaults.object(forKey: MagSafeLEDController.defaultsKey) as? Bool, false)
+        let requestCount = await transport.requestCount
+        XCTAssertEqual(requestCount, 1)
+    }
+
+    func testXPCWriterRejectsFailedHelperReply() async {
+        let writer = XPCMagSafeLEDCommandWriter(
+            transport: RecordingMagSafeXPCTransport(result: false)
+        )
+
+        do {
+            try await writer.write(.system)
+            XCTFail("Expected the helper rejection to be surfaced")
+        } catch {
+            XCTAssertNotNil(error)
+        }
+    }
+
+    func testCancelledXPCRequestCannotBeginSending() {
+        let coordinator = MagSafeLEDXPCRequestCoordinator()
+        var didSend = false
+
+        coordinator.cancel()
+        coordinator.sendIfNotCancelled {
+            didSend = true
+        }
+
+        XCTAssertFalse(didSend)
+    }
+
+    func testCancellationAfterXPCSendDoesNotCreateAnotherSend() {
+        let coordinator = MagSafeLEDXPCRequestCoordinator()
+        var sendCount = 0
+
+        coordinator.sendIfNotCancelled {
+            sendCount += 1
+        }
+        coordinator.cancel()
+        coordinator.sendIfNotCancelled {
+            sendCount += 1
+        }
+
+        XCTAssertEqual(sendCount, 1)
     }
 
     func testDefaultsToSystemControlAndPersistsSuccessfulOffCommand() async {
@@ -205,6 +242,20 @@ final class MagSafeLEDControllerTests: XCTestCase {
     }
 }
 
+private actor RecordingMagSafeXPCTransport: MagSafeLEDXPCTransporting {
+    private(set) var values: [UInt8] = []
+    private let result: Bool
+
+    init(result: Bool) {
+        self.result = result
+    }
+
+    func setLEDMode(rawValue: UInt8) async throws -> Bool {
+        values.append(rawValue)
+        return result
+    }
+}
+
 private enum TestFailure: Error {
     case write
 }
@@ -269,5 +320,19 @@ private final class RecordingMagSafeCommandWriter: MagSafeLEDCommandWriting, @un
     func write(_ mode: MagSafeLEDMode) async throws {
         if let error { throw error }
         modes.append(mode)
+    }
+}
+
+// Keep the real confirmation and writer/controller path; substitute hardware/IPC.
+private actor DelayedReadbackMagSafeXPCTransport: MagSafeLEDXPCTransporting {
+    private(set) var requestCount = 0
+
+    func setLEDMode(rawValue: UInt8) async throws -> Bool {
+        requestCount += 1
+        guard let command = MagSafeLEDCommand(rawValue: rawValue) else { return false }
+        var values: [UInt8?] = [4, nil, 1]
+        return MagSafeSMC.didApplyLEDMode(
+            command, writeSucceeded: true, readValue: { values.removeFirst() }
+        )
     }
 }

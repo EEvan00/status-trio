@@ -125,6 +125,14 @@ cp "$BIN_PATH/StatusTrio" "$CONTENTS/MacOS/StatusTrio"
 cp -R "$CORE_RESOURCE_BUNDLE" "$CONTENTS/Resources/"
 cp "$BIN_PATH/StatusTrioMagSafeHelper" "$CONTENTS/Resources/StatusTrioMagSafeHelper"
 cp "$ROOT/Support/com.status-trio.magsafe-helper.plist" "$CONTENTS/Library/LaunchDaemons/com.status-trio.magsafe-helper.plist"
+MAGSAFE_HELPER_LABEL="$BUNDLE_ID.MagSafeHelper"
+/usr/libexec/PlistBuddy \
+    -c "Set :Label $MAGSAFE_HELPER_LABEL" \
+    -c "Delete :MachServices" \
+    -c "Add :MachServices dict" \
+    -c "Add :MachServices:$MAGSAFE_HELPER_LABEL bool true" \
+    -c "Set :EnvironmentVariables:STATUS_TRIO_MACH_SERVICE $MAGSAFE_HELPER_LABEL" \
+    "$CONTENTS/Library/LaunchDaemons/com.status-trio.magsafe-helper.plist"
 
 SPARKLE_FRAMEWORK_SOURCE="$(find "$ROOT/.build/artifacts" -path '*/Sparkle.xcframework/macos-*/Sparkle.framework' -type d -print -quit)"
 if [[ -z "$SPARKLE_FRAMEWORK_SOURCE" ]]; then
@@ -228,6 +236,18 @@ plutil -lint "$CONTENTS/Info.plist"
 [[ -x "$CONTENTS/Resources/StatusTrioMagSafeHelper" ]] || { echo "Error: packaged MagSafe helper is missing." >&2; exit 1; }
 [[ -f "$CONTENTS/Library/LaunchDaemons/com.status-trio.magsafe-helper.plist" ]] || { echo "Error: packaged MagSafe launch daemon plist is missing." >&2; exit 1; }
 plutil -lint "$CONTENTS/Library/LaunchDaemons/com.status-trio.magsafe-helper.plist"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :Label' "$CONTENTS/Library/LaunchDaemons/com.status-trio.magsafe-helper.plist")" == "$MAGSAFE_HELPER_LABEL" ]] || {
+    echo "Error: packaged MagSafe helper label does not match the app bundle identifier." >&2
+    exit 1
+}
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:STATUS_TRIO_MACH_SERVICE' "$CONTENTS/Library/LaunchDaemons/com.status-trio.magsafe-helper.plist")" == "$MAGSAFE_HELPER_LABEL" ]] || {
+    echo "Error: packaged MagSafe XPC service environment does not match the helper label." >&2
+    exit 1
+}
+[[ "$(/usr/libexec/PlistBuddy -c "Print :MachServices:$MAGSAFE_HELPER_LABEL" "$CONTENTS/Library/LaunchDaemons/com.status-trio.magsafe-helper.plist")" == "true" ]] || {
+    echo "Error: packaged MagSafe Mach service does not match the helper label." >&2
+    exit 1
+}
 codesign --verify --strict --verbose=2 "$CONTENTS/Resources/StatusTrioMagSafeHelper"
 
 if [[ "$UNIVERSAL_BUILD" == "1" ]]; then

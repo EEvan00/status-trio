@@ -107,7 +107,7 @@ Status Trio follows the macOS preferred language by default and includes English
 
 Status Trio reads its regular status data through public macOS frameworks. It does not use App Sandbox or require a network entitlement, and it does not include telemetry or analytics. Location access is optional and requested only when you choose to display the current Wi-Fi network name.
 
-MagSafe LED control is an optional exception: Apple does not provide a public API for it, so this feature uses the private AppleSMC `ACLC` key on supported hardware. Enabling the feature registers a narrowly scoped launch daemon through macOS Service Management and requires user approval. The helper accepts only `system` or `off`, reports whether the verified SMC write succeeded, exits after each event, and can be unregistered only after it returns the LED to system control.
+MagSafe LED control is an optional exception: Apple does not provide a public API for it, so this feature uses the private AppleSMC `ACLC` key on supported hardware. Enabling the feature registers a narrowly scoped launch daemon through macOS Service Management and requires user approval. The app calls its on-demand Mach service over an XPC connection restricted to the containing app's exact code-signing requirement; the helper accepts only `system` or `off`, confirms Off with bounded readback retries (up to about one second, without repeating the write), directly replies with the SMC result, exits after 30 idle seconds, and can be unregistered only after it returns the LED to system control.
 
 ## Development
 

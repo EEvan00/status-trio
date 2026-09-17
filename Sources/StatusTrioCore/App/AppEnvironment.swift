@@ -48,7 +48,7 @@ final class AppEnvironment {
         let magSafeLED = MagSafeLEDController(
             hardwareProbe: SMCMagSafeLEDHardwareProbe(),
             helperManager: SystemMagSafeLEDHelperManager(),
-            commandWriter: FileMagSafeLEDCommandWriter()
+            commandWriter: XPCMagSafeLEDCommandWriter()
         )
         let store = makeStore(
             batteryMonitor: BatteryMonitor(),

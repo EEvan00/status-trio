@@ -4,7 +4,7 @@
 
 **Goal:** Add a persistent System/Off MagSafe indicator switch to a Battery secondary panel.
 
-**Architecture:** A testable app controller persists intent and writes a two-value configuration file. A launchd WatchPaths helper validates that file, writes only AppleSMC `ACLC`, and exits; the app reapplies Off on existing battery/wake events without polling.
+**Architecture:** A testable app controller persists intent and calls an on-demand privileged launchd Mach service over XPC. The helper validates the two-value request, writes only AppleSMC `ACLC`, replies directly, and exits; the app reapplies Off on existing battery/wake events without polling.
 
 **Tech Stack:** Swift 6, SwiftUI, AppKit, IOKit, launchd, SwiftPM, XCTest
 
@@ -28,7 +28,7 @@
 
 **Interfaces:**
 - Produces: `MagSafeLEDMode`, `MagSafeLEDState`, `MagSafeLEDControlling`, and `MagSafeLEDController`.
-- The controller persists a Boolean preference, exposes install/support/error state, atomically writes `system\n` or `off\n`, and reapplies only Off.
+- The controller persists a Boolean preference, exposes install/support/error state, sends only System or Off to the XPC transport, and reapplies only Off.
 
 - [ ] Write tests proving default System mode, persistence, exact command payloads, rejection on write failure, and Off-only event reapplication.
 - [ ] Run the focused test and confirm the missing production API causes failure.
@@ -49,12 +49,12 @@
 **Interfaces:**
 - `MagSafeSMC.supportsLEDControl() -> Bool`
 - `MagSafeSMC.setLEDMode(_:) -> Bool`, where the public mode type exposes only System and Off.
-- Helper accepts `--probe`, `--reset`, or a fixed configuration-file path.
+- Helper exposes only the fixed Mach service protocol and rejects raw values other than System and Off.
 
 - [ ] Add tests around command parsing and fixed-value validation before adding helper behavior.
 - [ ] Confirm the focused tests fail because the parser does not exist.
 - [ ] Implement the two-value parser, SMC client, and helper executable.
-- [ ] Add the root installer/uninstaller script and launchd job with no KeepAlive or polling.
+- [ ] Add the Service Management launch daemon with `MachServices`, no `RunAtLoad`, no `WatchPaths`, and no polling.
 - [ ] Build both debug and release targets.
 
 ### Task 3: Battery secondary panel
@@ -87,7 +87,7 @@
 - Modify: `README.zh-CN.md`
 
 **Interfaces:**
-- Packaged app contains the helper, installer, and launchd template in fixed resource paths.
+- Packaged app contains the helper and launchd template in the Service Management resource paths.
 - Nested helper is signed before the outer app and packaging verifies all required artifacts.
 
 - [ ] Update packaging and documentation.

@@ -2,15 +2,6 @@ import XCTest
 @testable import MagSafeSMC
 
 final class MagSafeSMCCommandTests: XCTestCase {
-    func testConfigurationAcceptsOnlySystemAndOffCommands() {
-        XCTAssertEqual(MagSafeLEDCommand(configuration: "system\n"), .system)
-        XCTAssertEqual(MagSafeLEDCommand(configuration: "off\n"), .off)
-
-        for invalid in ["", "green\n", "off now\n", "system\noff\n", "1\n"] {
-            XCTAssertNil(MagSafeLEDCommand(configuration: invalid), invalid)
-        }
-    }
-
     func testCommandsExposeOnlyDocumentedACLCValues() {
         XCTAssertEqual(MagSafeLEDCommand.system.smcValue, 0)
         XCTAssertEqual(MagSafeLEDCommand.off.smcValue, 1)
@@ -21,14 +12,14 @@ final class MagSafeSMCCommandTests: XCTestCase {
             MagSafeSMC.didApplyLEDMode(
                 .system,
                 writeSucceeded: true,
-                readValue: 4
+                readValue: { 4 }
             )
         )
         XCTAssertFalse(
             MagSafeSMC.didApplyLEDMode(
                 .system,
                 writeSucceeded: false,
-                readValue: 0
+                readValue: { 0 }
             )
         )
     }
@@ -38,63 +29,77 @@ final class MagSafeSMCCommandTests: XCTestCase {
             MagSafeSMC.didApplyLEDMode(
                 .off,
                 writeSucceeded: true,
-                readValue: 1
+                readValue: { 1 }
             )
         )
         XCTAssertFalse(
             MagSafeSMC.didApplyLEDMode(
                 .off,
                 writeSucceeded: true,
-                readValue: 4
+                readValue: { 4 }
             )
         )
     }
 
-    func testRequestAndResultRoundTripWithMatchingIdentifier() {
-        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789ABC")!
-        let request = MagSafeLEDRequest(id: id, command: .off)
-        let result = MagSafeLEDResult(id: id, succeeded: true)
+    func testOffModeWaitsForDelayedReadbackWithinOneRequest() {
+        var values: [UInt8?] = [4, nil, 1]
+        func nextValue() -> UInt8? { values.removeFirst() }
 
-        XCTAssertEqual(MagSafeLEDRequest(configuration: request.configuration), request)
-        XCTAssertEqual(MagSafeLEDResult(configuration: result.configuration), result)
+        XCTAssertTrue(MagSafeSMC.didApplyLEDMode(
+            .off, writeSucceeded: true, readValue: { nextValue() }
+        ))
+        XCTAssertTrue(values.isEmpty)
     }
 
-    func testRequestAndResultRejectMalformedPayloads() {
-        for invalid in ["", "off\n", "not-a-uuid off\n", "12345678-1234-1234-1234-123456789ABC green\n"] {
-            XCTAssertNil(MagSafeLEDRequest(configuration: invalid), invalid)
-        }
-        for invalid in ["", "ok\n", "not-a-uuid ok\n", "12345678-1234-1234-1234-123456789ABC maybe\n"] {
-            XCTAssertNil(MagSafeLEDResult(configuration: invalid), invalid)
-        }
+    func testFailedWriteCannotBeRescuedByMatchingReadback() {
+        XCTAssertFalse(MagSafeSMC.didApplyLEDMode(
+            .off, writeSucceeded: false, readValue: { 1 }
+        ))
     }
 
-    func testConsumingRequestRemovesWatchedPathBeforeReturning() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("StatusTrioSMCRequestTests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let requestURL = directory.appendingPathComponent("request")
-        let expected = MagSafeLEDRequest(
-            id: UUID(uuidString: "12345678-1234-1234-1234-123456789ABC")!,
-            command: .off
+    func testOffModeRejectsUnavailableReadback() {
+        XCTAssertFalse(MagSafeSMC.didApplyLEDMode(
+            .off, writeSucceeded: true, readValue: { nil }
+        ))
+    }
+
+    func testXPCServiceForwardsOnlySupportedModes() {
+        let recorder = MagSafeModeRecorder()
+        let lifecycle = MagSafeLifecycleRecorder()
+        let service = MagSafeLEDXPCService { command in
+            recorder.commands.append(command)
+            return true
+        } requestDidBegin: {
+            lifecycle.beginCount += 1
+        } requestDidEnd: {
+            lifecycle.endCount += 1
+        }
+        var offSucceeded = false
+        var invalidSucceeded = true
+
+        service.setLEDMode(MagSafeLEDCommand.off.rawValue) { offSucceeded = $0 }
+        service.setLEDMode(2) { invalidSucceeded = $0 }
+
+        XCTAssertTrue(offSucceeded)
+        XCTAssertFalse(invalidSucceeded)
+        XCTAssertEqual(recorder.commands, [.off])
+        XCTAssertEqual(lifecycle.beginCount, 2)
+        XCTAssertEqual(lifecycle.endCount, 2)
+    }
+
+    func testMachServiceNameFollowsBundleIdentifier() {
+        XCTAssertEqual(
+            MagSafeLEDXPC.serviceName(bundleIdentifier: "com.example.StatusTrio.dev"),
+            "com.example.StatusTrio.dev.MagSafeHelper"
         )
-        try Data(expected.configuration.utf8).write(to: requestURL)
-
-        let request = try MagSafeLEDRequestFile.consume(at: requestURL)
-
-        XCTAssertEqual(request, expected)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: requestURL.path))
     }
+}
 
-    func testConsumingMalformedRequestStillRemovesWatchedPath() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("StatusTrioSMCRequestTests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let requestURL = directory.appendingPathComponent("request")
-        try Data("malformed\n".utf8).write(to: requestURL)
+private final class MagSafeModeRecorder: @unchecked Sendable {
+    var commands: [MagSafeLEDCommand] = []
+}
 
-        XCTAssertThrowsError(try MagSafeLEDRequestFile.consume(at: requestURL))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: requestURL.path))
-    }
+private final class MagSafeLifecycleRecorder: @unchecked Sendable {
+    var beginCount = 0
+    var endCount = 0
 }

@@ -6,82 +6,7 @@ public enum MagSafeLEDCommand: UInt8, Equatable, Sendable {
     case system = 0
     case off = 1
 
-    public init?(configuration: String) {
-        switch configuration {
-        case "system\n": self = .system
-        case "off\n": self = .off
-        default: return nil
-        }
-    }
-
     public var smcValue: UInt8 { rawValue }
-    public var configuration: String { self == .system ? "system\n" : "off\n" }
-}
-
-public struct MagSafeLEDRequest: Equatable, Sendable {
-    public let id: UUID
-    public let command: MagSafeLEDCommand
-
-    public init(id: UUID = UUID(), command: MagSafeLEDCommand) {
-        self.id = id
-        self.command = command
-    }
-
-    public init?(configuration: String) {
-        let parts = configuration.dropLast().split(separator: " ", omittingEmptySubsequences: false)
-        guard configuration.hasSuffix("\n"), parts.count == 2,
-              let id = UUID(uuidString: String(parts[0])),
-              let command = MagSafeLEDCommand(configuration: String(parts[1]) + "\n") else {
-            return nil
-        }
-        self.init(id: id, command: command)
-    }
-
-    public var configuration: String {
-        "\(id.uuidString) \(command.configuration)"
-    }
-}
-
-public struct MagSafeLEDResult: Equatable, Sendable {
-    public let id: UUID
-    public let succeeded: Bool
-
-    public init(id: UUID, succeeded: Bool) {
-        self.id = id
-        self.succeeded = succeeded
-    }
-
-    public init?(configuration: String) {
-        let parts = configuration.dropLast().split(separator: " ", omittingEmptySubsequences: false)
-        guard configuration.hasSuffix("\n"), parts.count == 2,
-              let id = UUID(uuidString: String(parts[0])) else { return nil }
-        switch parts[1] {
-        case "ok": self.init(id: id, succeeded: true)
-        case "error": self.init(id: id, succeeded: false)
-        default: return nil
-        }
-    }
-
-    public var configuration: String {
-        "\(id.uuidString) \(succeeded ? "ok" : "error")\n"
-    }
-}
-
-public enum MagSafeLEDRequestFile {
-    public static func consume(at url: URL) throws -> MagSafeLEDRequest {
-        let claimedURL = url.deletingLastPathComponent().appendingPathComponent(
-            ".\(url.lastPathComponent).processing-\(UUID().uuidString)"
-        )
-        try FileManager.default.moveItem(at: url, to: claimedURL)
-        defer { try? FileManager.default.removeItem(at: claimedURL) }
-
-        let data = try Data(contentsOf: claimedURL)
-        guard let configuration = String(data: data, encoding: .utf8),
-              let request = MagSafeLEDRequest(configuration: configuration) else {
-            throw CocoaError(.fileReadCorruptFile)
-        }
-        return request
-    }
 }
 
 public enum MagSafeSMC {
@@ -99,14 +24,14 @@ public enum MagSafeSMC {
         return didApplyLEDMode(
             command,
             writeSucceeded: true,
-            readValue: connection.readBytes(key: "ACLC")?.first
+            readValue: { connection.readBytes(key: "ACLC")?.first }
         )
     }
 
     static func didApplyLEDMode(
         _ command: MagSafeLEDCommand,
         writeSucceeded: Bool,
-        readValue: UInt8?
+        readValue: () -> UInt8?
     ) -> Bool {
         guard writeSucceeded else { return false }
         if command == .system {
@@ -114,7 +39,18 @@ public enum MagSafeSMC {
             // replace the readback with its current green or amber state.
             return true
         }
-        return readValue == command.smcValue
+        // Firmware readback can lag behind a successful write. Confirm within
+        // this request rather than reporting failure and requiring another click.
+        // This runs in the helper, never on the app's main actor. Write only once.
+        var lastValue: UInt8?
+        for attempt in 0...20 {
+            if attempt > 0 { Thread.sleep(forTimeInterval: 0.05) }
+            lastValue = readValue()
+            if lastValue == command.smcValue { return true }
+        }
+        NSLog("MagSafe ACLC off confirmation timed out; last readback: %@",
+              lastValue.map { String($0) } ?? "unavailable")
+        return false
     }
 }
 

@@ -20,57 +20,146 @@ struct SMCMagSafeLEDHardwareProbe: MagSafeLEDHardwareProbing {
     }
 }
 
-struct FileMagSafeLEDCommandWriter: MagSafeLEDCommandWriting {
-    static let supportPath = "/Users/Shared/Status Trio"
-    static let requestPath = "\(supportPath)/magsafe-led-request"
-    static let resultPath = "\(supportPath)/magsafe-led-result"
+protocol MagSafeLEDXPCTransporting: Sendable {
+    func setLEDMode(rawValue: UInt8) async throws -> Bool
+}
 
-    let requestURL: URL
-    let resultURL: URL
-    let timeout: Duration
-    let retryInterval: Duration
+struct XPCMagSafeLEDCommandWriter: MagSafeLEDCommandWriting {
+    private let transport: any MagSafeLEDXPCTransporting
 
-    init(
-        requestURL: URL = URL(fileURLWithPath: requestPath),
-        resultURL: URL = URL(fileURLWithPath: resultPath),
-        timeout: Duration = .seconds(3),
-        retryInterval: Duration = .milliseconds(50)
-    ) {
-        self.requestURL = requestURL
-        self.resultURL = resultURL
-        self.timeout = timeout
-        self.retryInterval = retryInterval
+    init(transport: any MagSafeLEDXPCTransporting = SystemMagSafeLEDXPCTransport()) {
+        self.transport = transport
     }
 
     func write(_ mode: MagSafeLEDMode) async throws {
         let command: MagSafeLEDCommand = mode == .system ? .system : .off
-        let request = MagSafeLEDRequest(command: command)
-        try FileManager.default.createDirectory(
-            at: requestURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        try Data(request.configuration.utf8).write(to: requestURL, options: .atomic)
-
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: timeout)
-        while clock.now < deadline {
-            if let data = try? Data(contentsOf: resultURL),
-               let configuration = String(data: data, encoding: .utf8),
-               let result = MagSafeLEDResult(configuration: configuration),
-               result.id == request.id {
-                guard result.succeeded else { throw MagSafeLEDCommandError.rejected }
-                return
-            }
-            try await Task.sleep(for: retryInterval)
+        guard try await transport.setLEDMode(rawValue: command.rawValue) else {
+            throw MagSafeLEDCommandError.rejected
         }
-        throw MagSafeLEDCommandError.timedOut
+    }
+}
+
+private final class SystemMagSafeLEDXPCTransport: MagSafeLEDXPCTransporting, @unchecked Sendable {
+    private let serviceName: String
+
+    init(
+        serviceName: String = MagSafeLEDXPC.serviceName(
+            bundleIdentifier: Bundle.main.bundleIdentifier
+        )
+    ) {
+        self.serviceName = serviceName
+    }
+
+    func setLEDMode(rawValue: UInt8) async throws -> Bool {
+        let coordinator = MagSafeLEDXPCRequestCoordinator()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let connection = NSXPCConnection(
+                    machServiceName: serviceName,
+                    options: .privileged
+                )
+                let request = MagSafeLEDXPCRequest(
+                    connection: connection,
+                    continuation: continuation
+                )
+                coordinator.install(request)
+                connection.remoteObjectInterface = NSXPCInterface(with: MagSafeLEDXPCProtocol.self)
+                connection.interruptionHandler = {
+                    request.finish(.failure(MagSafeLEDCommandError.connectionInterrupted))
+                }
+                connection.invalidationHandler = {
+                    request.finish(.failure(MagSafeLEDCommandError.connectionInvalidated))
+                }
+                coordinator.sendIfNotCancelled {
+                    connection.resume()
+
+                    guard let proxy = connection.remoteObjectProxyWithErrorHandler({ error in
+                        request.finish(.failure(error))
+                    }) as? MagSafeLEDXPCProtocol else {
+                        request.finish(.failure(MagSafeLEDCommandError.invalidProxy))
+                        return
+                    }
+                    proxy.setLEDMode(rawValue) { succeeded in
+                        request.finish(.success(succeeded))
+                    }
+                }
+            }
+        } onCancel: {
+            coordinator.cancel()
+        }
+    }
+}
+
+final class MagSafeLEDXPCRequestCoordinator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var request: MagSafeLEDXPCRequest?
+    private var isCancelled = false
+    private var hasSent = false
+
+    fileprivate func install(_ request: MagSafeLEDXPCRequest) {
+        lock.lock()
+        self.request = request
+        let shouldCancel = isCancelled
+        lock.unlock()
+        if shouldCancel {
+            request.finish(.failure(CancellationError()))
+        }
+    }
+
+    func cancel() {
+        lock.lock()
+        isCancelled = true
+        let request = hasSent ? nil : request
+        lock.unlock()
+        request?.finish(.failure(CancellationError()))
+    }
+
+    func sendIfNotCancelled(_ send: () -> Void) {
+        lock.lock()
+        guard !isCancelled else {
+            lock.unlock()
+            return
+        }
+        hasSent = true
+        send()
+        lock.unlock()
+    }
+}
+
+private final class MagSafeLEDXPCRequest: @unchecked Sendable {
+    private let lock = NSLock()
+    private var connection: NSXPCConnection?
+    private var continuation: CheckedContinuation<Bool, Error>?
+
+    init(
+        connection: NSXPCConnection,
+        continuation: CheckedContinuation<Bool, Error>
+    ) {
+        self.connection = connection
+        self.continuation = continuation
+    }
+
+    func finish(_ result: Result<Bool, Error>) {
+        lock.lock()
+        guard let continuation else {
+            lock.unlock()
+            return
+        }
+        self.continuation = nil
+        let connection = self.connection
+        self.connection = nil
+        lock.unlock()
+
+        continuation.resume(with: result)
+        connection?.invalidate()
     }
 }
 
 private enum MagSafeLEDCommandError: Error {
     case rejected
-    case timedOut
+    case invalidProxy
+    case connectionInterrupted
+    case connectionInvalidated
 }
 
 struct SystemMagSafeLEDHelperManager: MagSafeLEDHelperManaging {

@@ -107,7 +107,7 @@ Status Trio 默认跟随 macOS 首选语言，支持 English、简体中文、�
 
 Status Trio 的常规状态信息通过 macOS 公开框架读取，不使用 App Sandbox，也不需要网络权限，且不包含遥测或分析功能。定位权限为可选项，仅在用户选择显示当前 Wi-Fi 网络名称时请求。
 
-MagSafe 指示灯控制是一个可选的例外：Apple 没有为它提供公开 API，因此该功能会在受支持的硬件上使用 AppleSMC 私有 `ACLC` 键。首次启用会通过 macOS Service Management 注册用途受限的 launch daemon，并需要用户批准。helper 只接受 `system` 或 `off` 两种命令，会回报经读取验证后的 SMC 写入结果，每次事件处理完即退出；只有先把指示灯成功恢复为跟随系统，才会注销 helper。
+MagSafe 指示灯控制是一个可选的例外：Apple 没有为它提供公开 API，因此该功能会在受支持的硬件上使用 AppleSMC 私有 `ACLC` 键。首次启用会通过 macOS Service Management 注册用途受限的 launch daemon，并需要用户批准。App 通过仅允许同一 App 精确代码签名要求的 XPC 连接按需调用 Mach service；helper 只接受 `system` 或 `off` 两种命令，关灯时会在约一秒内有限重试回读确认（不重复写入），然后直接回复 SMC 结果，并在空闲 30 秒后退出；只有先把指示灯成功恢复为跟随系统，才会注销 helper。
 
 ## 开发
 

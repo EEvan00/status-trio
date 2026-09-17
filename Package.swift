@@ -56,7 +56,8 @@ let package = Package(
         .executableTarget(
             name: "StatusTrioMagSafeHelper",
             dependencies: ["MagSafeSMC"],
-            path: "Sources/StatusTrioMagSafeHelper"
+            path: "Sources/StatusTrioMagSafeHelper",
+            linkerSettings: [.linkedFramework("Security")]
         ),
         .testTarget(
             name: "StatusTrioCoreTests",

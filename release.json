@@ -1,7 +1,7 @@
 {
   "app_name": "Status Trio",
   "bundle_id": "io.github.404404.StatusTrio",
-  "github_repo": "404404/status-trio",
+  "github_repo": "EEvan00/status-trio",
   "git_branch": "main",
   "min_system_version": "15.0",
   "bundle_name": "Status Trio.app",
